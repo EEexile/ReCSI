@@ -1,0 +1,6 @@
+numpy>=1.24
+torch>=2.1
+# Additional Stage-I dependencies; match torchaudio to the installed torch build.
+torchaudio>=2.1
+transformers>=4.40,<5
+soundfile>=0.12

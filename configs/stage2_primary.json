@@ -1,0 +1,66 @@
+{
+  "device": "cuda:0",
+  "cpu_threads": 2,
+  "init_seeds": [
+    42,
+    43,
+    44
+  ],
+  "calibration_cohort": "MELD",
+  "cohorts": [
+    {
+      "name": "MELD",
+      "dataset": "MELD",
+      "train_cache": "local_assets/cache/MELD/train.pt",
+      "dev_cache": "local_assets/cache/MELD/dev.pt",
+      "eval_cache": "local_assets/cache/MELD/test.pt",
+      "eval_sha256": "REPLACE_WITH_PRECOMPUTED_64_HEX_CACHE_SHA256",
+      "expected_eval_count": 2610
+    },
+    {
+      "name": "IEM_fold1",
+      "dataset": "IEMOCAP",
+      "fold": 1,
+      "train_cache": "local_assets/cache/IEM_fold1/train.pt",
+      "eval_cache": "local_assets/cache/IEM_fold1/heldout.pt",
+      "eval_sha256": "REPLACE_WITH_PRECOMPUTED_64_HEX_CACHE_SHA256",
+      "expected_eval_count": 1085
+    },
+    {
+      "name": "IEM_fold2",
+      "dataset": "IEMOCAP",
+      "fold": 2,
+      "train_cache": "local_assets/cache/IEM_fold2/train.pt",
+      "eval_cache": "local_assets/cache/IEM_fold2/heldout.pt",
+      "eval_sha256": "REPLACE_WITH_PRECOMPUTED_64_HEX_CACHE_SHA256",
+      "expected_eval_count": 1023
+    },
+    {
+      "name": "IEM_fold3",
+      "dataset": "IEMOCAP",
+      "fold": 3,
+      "train_cache": "local_assets/cache/IEM_fold3/train.pt",
+      "eval_cache": "local_assets/cache/IEM_fold3/heldout.pt",
+      "eval_sha256": "REPLACE_WITH_PRECOMPUTED_64_HEX_CACHE_SHA256",
+      "expected_eval_count": 1151
+    },
+    {
+      "name": "IEM_fold4",
+      "dataset": "IEMOCAP",
+      "fold": 4,
+      "train_cache": "local_assets/cache/IEM_fold4/train.pt",
+      "eval_cache": "local_assets/cache/IEM_fold4/heldout.pt",
+      "eval_sha256": "REPLACE_WITH_PRECOMPUTED_64_HEX_CACHE_SHA256",
+      "expected_eval_count": 1031
+    },
+    {
+      "name": "IEM_fold5",
+      "dataset": "IEMOCAP",
+      "fold": 5,
+      "train_cache": "local_assets/cache/IEM_fold5/train.pt",
+      "eval_cache": "local_assets/cache/IEM_fold5/heldout.pt",
+      "eval_sha256": "REPLACE_WITH_PRECOMPUTED_64_HEX_CACHE_SHA256",
+      "expected_eval_count": 1241
+    }
+  ]
+}

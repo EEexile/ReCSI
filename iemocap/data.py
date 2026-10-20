@@ -1,0 +1,120 @@
+"""Current-utterance IEMOCAP audio and human transcript; no augmentation/context."""
+import csv
+import hashlib
+import random
+from pathlib import Path
+
+import numpy as np
+import soundfile as sf
+import torch
+import torchaudio
+from torch.utils.data import Dataset
+from transformers import RobertaTokenizer
+
+from ctc_targets import build_ctc_record, resolve_conv_config
+
+LABELS = ['ang', 'hap', 'neu', 'sad']
+
+
+def read_rows(csv_path):
+    with open(csv_path, encoding='utf-8-sig', newline='') as handle:
+        rows = list(csv.DictReader(handle))
+    ids = [r['file'] for r in rows]
+    assert len(ids) == len(set(ids)) == 5531
+    assert all(r['emotion'] in LABELS and r['text'].strip() for r in rows)
+    assert all(r['speaker'][:5] == r['file'][:5] for r in rows)
+    return rows
+
+
+def split_rows(rows, fold):
+    assert fold in range(1, 6)
+    train = [r for r in rows if int(r['file'][3:5]) != fold]
+    heldout = [r for r in rows if int(r['file'][3:5]) == fold]
+    assert {int(r['file'][3:5]) for r in train} == set(range(1, 6)) - {fold}
+    assert {r['file'] for r in train}.isdisjoint(r['file'] for r in heldout)
+    assert len(train) + len(heldout) == len(rows)
+    return train, heldout
+
+
+def rows_digest(rows):
+    return hashlib.sha256('\n'.join(r['file'] for r in rows).encode()).hexdigest()
+
+
+def seed_worker(worker_id):
+    seed = torch.initial_seed() % (2 ** 32)
+    np.random.seed(seed)
+    random.seed(seed)
+
+
+class IEMOCAPDataset(Dataset):
+    def __init__(self, rows, config):
+        self.rows = rows
+        self.audio_dir = Path(config['audio_dir'])
+        self.sample_rate = config['sample_rate']
+        self.max_samples = int(config['max_audio_seconds'] * self.sample_rate)
+        tokenizer = RobertaTokenizer.from_pretrained(config['roberta_path'], local_files_only=True)
+        # Cache deterministic tokenization, retain native RoBERTa special tokens.
+        self.encoded = tokenizer([r['text'] for r in rows], truncation=True,
+                                 max_length=config['max_text_tokens'], padding=False)
+        self.pad_id = tokenizer.pad_token_id
+        # Inspect only WAV headers; preserve every CE row, transcript and token.
+        self.ctc_conv_kernel, self.ctc_conv_stride, self.ctc_encoder_config = resolve_conv_config(config)
+        self.ctc_records = []
+        for row in rows:
+            header = sf.info(str(self.audio_dir / (row['file'] + '.wav')))
+            self.ctc_records.append(build_ctc_record(
+                row, header.frames, header.samplerate,
+                self.ctc_conv_kernel, self.ctc_conv_stride,
+                sample_rate=self.sample_rate, max_samples=self.max_samples))
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, index):
+        row = self.rows[index]
+        path = self.audio_dir / (row['file'] + '.wav')
+        # Raise on unreadable audio: never silently substitute zeros.
+        wave, rate = sf.read(str(path), dtype='float32', always_2d=True)
+        wave = torch.from_numpy(wave.mean(axis=1).copy())
+        if rate != self.sample_rate:
+            wave = torchaudio.functional.resample(wave, rate, self.sample_rate)
+        wave = wave[:self.max_samples]
+        assert wave.numel() >= 400 and torch.isfinite(wave).all(), str(path)
+        if wave.numel() != self.ctc_records[index]['audio_samples_used']:
+            raise ValueError(f'WAV length differs from the CTC header manifest: {path}')
+        return {'audio': wave, 'input_ids': self.encoded['input_ids'][index],
+                'label': LABELS.index(row['emotion']), 'file_id': row['file'],
+                'speaker': row['speaker'], 'pad_id': self.pad_id,
+                'ctc_record': self.ctc_records[index]}
+
+
+def collate(batch):
+    # Batch-wise padding; all variants use identical order, limits and preprocessing.
+    lengths = torch.tensor([b['audio'].numel() for b in batch], dtype=torch.long)
+    audio = torch.zeros(len(batch), int(lengths.max()))
+    text_len = max(len(b['input_ids']) for b in batch)
+    tokens = torch.full((len(batch), text_len), batch[0]['pad_id'], dtype=torch.long)
+    mask = torch.zeros_like(tokens)
+    for i, item in enumerate(batch):
+        audio[i, :lengths[i]] = item['audio']
+        n = len(item['input_ids'])
+        tokens[i, :n] = torch.tensor(item['input_ids'])
+        mask[i, :n] = 1
+    records = [item['ctc_record'] for item in batch]
+    target_lengths = torch.tensor([r['target_length_clean'] for r in records], dtype=torch.long)
+    # Padding uses blank=0, but only the first target_lengths entries are targets.
+    targets = torch.zeros((len(batch), int(target_lengths.max())), dtype=torch.long)
+    for i, record in enumerate(records):
+        targets[i, :target_lengths[i]] = torch.tensor(record['target_ids'], dtype=torch.long)
+    return {'audio_inputs': audio, 'audio_lengths': lengths,
+            'text_input_ids': tokens, 'text_attention_mask': mask,
+            'labels': torch.tensor([b['label'] for b in batch], dtype=torch.long),
+            'file_ids': [b['file_id'] for b in batch],
+            'speakers': [b['speaker'] for b in batch],
+            'ctc_targets': targets, 'ctc_target_lengths': target_lengths,
+            'ctc_eligible': torch.tensor([r['eligible'] for r in records], dtype=torch.bool),
+            'ctc_exclusion_reasons': [r['exclusion_reasons'] for r in records],
+            'ctc_target_texts': [r['target_text'] for r in records],
+            'ctc_target_hashes': [r['target_hash'] for r in records],
+            'ctc_expected_feature_lengths': torch.tensor([r['audio_feature_frames'] for r in records], dtype=torch.long),
+            'ctc_minimum_frames': torch.tensor([r['minimum_ctc_frames_clean'] for r in records], dtype=torch.long)}
