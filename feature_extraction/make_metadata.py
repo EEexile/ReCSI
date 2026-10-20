@@ -1,4 +1,4 @@
-"""Create cache metadata from existing CSV and true IEMOCAP timestamps."""
+"""Create dialogue metadata from CSV files and IEMOCAP timestamps."""
 import argparse
 import csv
 import json

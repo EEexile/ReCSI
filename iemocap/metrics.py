@@ -1,4 +1,4 @@
-"""Four-class metrics and strictly improving held-out WA checkpoint selection."""
+"""Emotion classification metrics and WA checkpoint selection."""
 import numpy as np
 
 
@@ -21,5 +21,5 @@ def classification_metrics(labels, predictions, num_classes=4):
 
 
 def is_better(metrics, best_correct):
-    # The held-out set is identical every epoch, so integer count is exact WA ordering.
+
     return metrics['correct'] > best_correct

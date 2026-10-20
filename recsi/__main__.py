@@ -1,4 +1,4 @@
-"""Training and evaluation entry point: python -m recsi."""
+"""Train and evaluate ReCSI: python -m recsi."""
 import argparse
 import csv
 import json
@@ -107,7 +107,7 @@ def evaluate_study(study, output, device="cpu"):
     locksha = digest(lockpath)
     if lock["code_sha256"] != code_hashes():
         raise RuntimeError("Code changed after global selection lock")
-    # Validate model/grammar bindings before claiming the single evaluation.
+
     for row in lock["cohorts"]:
         for artifact in [row["grammar"], *row["heads"]]:
             if digest(study/artifact["file"]) != artifact["sha256"]:

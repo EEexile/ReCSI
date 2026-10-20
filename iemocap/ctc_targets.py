@@ -1,8 +1,4 @@
-"""Independent CTC transcript contract; never rewrites the SER text or filters rows.
-
-The rule reproduces the 2026-09-27 read-only draft audit. Passing it establishes
-mechanical prerequisites only, not human-verified transcription correctness.
-"""
+"""CTC transcript normalization, targets, and frame-length checks."""
 import hashlib
 import json
 import re
@@ -29,7 +25,7 @@ def text_sha256(text):
 
 
 def normalize_original(text):
-    # strip happens BEFORE whitelist filtering, exactly as in MMSD and the audit.
+
     return ''.join(char for char in text.lower().strip() if char in CTC_CHAR_TO_ID)
 
 
@@ -49,11 +45,7 @@ def feature_frame_count(sample_count, conv_kernel, conv_stride):
 
 
 def resolve_conv_config(config):
-    """Read the same local encoder config as the model; allow explicit mock config.
 
-    No silent default is used when a production encoder config is missing. An
-    explicit override is checked against the real file whenever both exist.
-    """
     explicit_kernel = config.get('ctc_conv_kernel')
     explicit_stride = config.get('ctc_conv_stride')
     if (explicit_kernel is None) != (explicit_stride is None):
@@ -82,13 +74,7 @@ def resolve_conv_config(config):
 
 def build_ctc_record(row, audio_frames, audio_sample_rate, conv_kernel, conv_stride,
                      sample_rate=16000, max_samples=160000):
-    """Create auditable targets using WAV header frames (not padded/cropped length).
 
-    Ceil(frames * output_rate / source_rate) follows the audit and the resampling
-    output-size rule. The actual training corpus has 16 kHz files throughout.
-    Unmatched brackets are rejected as a conservative extension; none occur in
-    the audited corpus, so the complete 5,531-record results remain identical.
-    """
     if sample_rate != 16000 or max_samples != 160000:
         raise ValueError('R2 CTC target rule is frozen to 16 kHz and a 10 s cap.')
     if audio_sample_rate <= 0 or audio_frames < 0:

@@ -1,4 +1,4 @@
-"""Explicit R2 auxiliary reductions; emotion labels never enter instance CL."""
+"""CTC and paired audio-text contrastive losses."""
 from collections import Counter
 
 import torch
@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 
 def auxiliary_terms(outputs, batch, config):
-    """Return raw CTC/CL and auditable counts, without applying weights twice."""
+
     zero = outputs['logits'].new_zeros((), dtype=torch.float32)
     ctc, contrastive = zero, zero
     n = int(batch['labels'].numel())
@@ -46,7 +46,7 @@ def auxiliary_terms(outputs, batch, config):
             if not ((t >= u + repeats) & (t <= logits.shape[1])).all():
                 ids = [batch['file_ids'][int(i)] for i in indices.cpu().tolist()]
                 raise ValueError('Eligible CTC target failed actual model frame check: ' + repr(ids))
-            # Keep the CTC dynamic program and normalization outside bf16 autocast.
+
             with torch.autocast(device_type=logits.device.type, enabled=False):
                 log_probs = F.log_softmax(logits.index_select(0, indices).float(), dim=-1).transpose(0, 1).contiguous()
                 raw = F.ctc_loss(log_probs, chosen, t.cpu(), u.cpu(), blank=0,
@@ -56,7 +56,7 @@ def auxiliary_terms(outputs, batch, config):
                     raise FloatingPointError('Non-finite eligible CTC: ' + repr([batch['file_ids'][i] for i in bad]))
                 ctc = (raw / u.to(raw.dtype)).mean()
             counts['ctc_target_chars'] = int(u.sum().item())
-        # Empty subset deliberately leaves a constant zero; ASR gradients stay None.
+
     if config['auxiliary_weights']['contrastive']:
         contrastive = outputs['contrastive_loss']
         if contrastive is None or contrastive.ndim != 0 or not torch.isfinite(contrastive):

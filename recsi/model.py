@@ -1,4 +1,4 @@
-"""Residual correction, original training, and compact-head conversion."""
+"""Residual correction, training, and compact-head conversion."""
 import copy
 import hashlib
 import random
@@ -38,7 +38,7 @@ def normalize(x, normalizer):
 
 
 def unary_probability(logits, dataset):
-    # Match the distinct historical source exporters; preserve this distinction.
+
     if dataset == "MELD":
         p = logits.float().softmax(1).cpu().double()
     elif dataset == "IEMOCAP":
@@ -50,13 +50,13 @@ def unary_probability(logits, dataset):
 
 
 def stage1_probability(logits):
-    """The original Stage-I-only grammar control always softmaxes in CPU FP64."""
+
     p = logits.cpu().double().softmax(1).clamp_min(1e-12)
     return p / p.sum(1, keepdim=True)
 
 
 class ArchivedTrainingCorrector(nn.Module):
-    """Original creation/RNG order and trainable layout, for reproduction only."""
+    """Training layout used by the released checkpoints."""
 
     def __init__(self, classes=7):
         super().__init__()
@@ -106,12 +106,7 @@ def _layout(state, classes):
 
 @torch.no_grad()
 def compact_state_dict(state, classes):
-    """Fold a fixed zero-context head, without modifying the source state.
-
-    Input must belong to ReCSI's zero-history/count protocol. Nonzero-context
-    use of a generic archived head is not supported by this conversion.
-    Folding is after member averaging; folding each member first is different.
-    """
+    """Fold the zero-context branch after member parameter averaging."""
     layout = _layout(state, classes)
     keys = ("current.0.weight", "current.0.bias", "output.weight", "output.bias")
     result = {key: state[key].detach().clone() for key in keys}
@@ -126,7 +121,7 @@ def compact_state_dict(state, classes):
 
 
 def readout_from_state(state, classes, *, compact=False):
-    """Load strictly; archived states keep the historical arithmetic by default."""
+
     layout = _layout(state, classes)
     if compact:
         state = compact_state_dict(state, classes)
@@ -139,7 +134,7 @@ def readout_from_state(state, classes, *, compact=False):
 
 
 def compact_head_bundle(bundle):
-    """Export the already-averaged inference head; retain the original for fitting."""
+    """Convert an averaged checkpoint to compact inference form."""
     required = {"model", "classes", "dataset", "normalizer", "stage1_sha256"}
     if not isinstance(bundle, dict) or not required.issubset(bundle):
         raise ValueError("Expected a ReCSI head bundle, not a raw checkpoint container")
@@ -159,8 +154,8 @@ def compact_head_bundle(bundle):
             raise ValueError("Invalid TRAIN normalizer")
     if not (norm["std"] > 0).all():
         raise ValueError("Normalizer standard deviations must be positive")
-    # Member histories/weights stay in the original training artifact. Folding
-    # happens on the averaged state, not before nonlinear member averaging.
+
+
     result = {key: copy.deepcopy(value) for key, value in bundle.items()
               if key not in ("model", "members", "conversion")}
     result["model"] = compact_state_dict(bundle["model"], c)
@@ -279,7 +274,7 @@ def head_probabilities(bundle, cache, device="cpu"):
     c = bundle["classes"]
     if cache["stage1_sha256"] != bundle["stage1_sha256"]:
         raise ValueError("Head and cache refer to different Stage-I checkpoints")
-    # Never silently convert a sealed historical study or change its arithmetic.
+
     model = readout_from_state(bundle["model"], c).to(device)
     model.eval()
     x = normalize(cache["x"], bundle["normalizer"]).to(device)

@@ -1,4 +1,4 @@
-"""Current-utterance MELD official splits; seven fixed labels; no augmentation/context."""
+"""MELD audio-text data loading and collation."""
 import csv
 import hashlib
 import random
@@ -52,11 +52,11 @@ class MELDDataset(Dataset):
         self.sample_rate = config['sample_rate']
         self.max_samples = int(config['max_audio_seconds'] * self.sample_rate)
         tokenizer = RobertaTokenizer.from_pretrained(config['roberta_path'], local_files_only=True)
-        # Cache deterministic tokenization, retain native RoBERTa special tokens.
+
         self.encoded = tokenizer([r['text'] for r in rows], truncation=True,
                                  max_length=config['max_text_tokens'], padding=False)
         self.pad_id = tokenizer.pad_token_id
-        # Inspect only WAV headers; preserve every CE row, transcript and token.
+
         self.ctc_conv_kernel, self.ctc_conv_stride, self.ctc_encoder_config = resolve_conv_config(config)
         self.ctc_records = []
         for row in rows:
@@ -72,7 +72,7 @@ class MELDDataset(Dataset):
     def __getitem__(self, index):
         row = self.rows[index]
         path = self.audio_dir / (row['file'] + '.wav')
-        # Raise on unreadable audio: never silently substitute zeros.
+
         wave, rate = sf.read(str(path), dtype='float32', always_2d=True)
         wave = torch.from_numpy(wave.mean(axis=1).copy())
         if rate != self.sample_rate:
@@ -88,7 +88,7 @@ class MELDDataset(Dataset):
 
 
 def collate(batch):
-    # Batch-wise padding; all variants use identical order, limits and preprocessing.
+
     lengths = torch.tensor([b['audio'].numel() for b in batch], dtype=torch.long)
     audio = torch.zeros(len(batch), int(lengths.max()))
     text_len = max(len(b['input_ids']) for b in batch)
@@ -101,7 +101,7 @@ def collate(batch):
         mask[i, :n] = 1
     records = [item['ctc_record'] for item in batch]
     target_lengths = torch.tensor([r['target_length_clean'] for r in records], dtype=torch.long)
-    # Padding uses blank=0, but only the first target_lengths entries are targets.
+
     targets = torch.zeros((len(batch), int(target_lengths.max())), dtype=torch.long)
     for i, record in enumerate(records):
         targets[i, :target_lengths[i]] = torch.tensor(record['target_ids'], dtype=torch.long)

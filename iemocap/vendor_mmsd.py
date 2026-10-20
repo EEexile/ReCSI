@@ -1,14 +1,9 @@
-"""Verbatim MMSD building blocks; unused auxiliary heads are deliberately absent.
-Source: https://github.com/EEexile/MMSD / iemocap_code/stage1/model.py
-Source file SHA256: 1137b521d14cb6732ce49c03b5c260225baf2d9ca85f4251d51e28ccc902802d
-Classes are copied without implementation changes, including original layer norm,
-mask semantics, and attention pooling. BertCrossEncoder is only used with depth 1.
-"""
+"""MMSD attention and pooling blocks.
+Source: https://github.com/EEexile/MMSD (iemocap_code/stage1/model.py)."""
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 
 
 class BertLayerNorm(nn.Module):
@@ -71,7 +66,7 @@ class BertSelfAttention(nn.Module):
 
 
 class BertCoAttention(nn.Module):
-    """Cross-attention between two modalities"""
+
     def __init__(self, config):
         super(BertCoAttention, self).__init__()
         if config.hidden_size % config.num_attention_heads != 0:
@@ -243,44 +238,33 @@ class BertCrossEncoder(nn.Module):
 
 
 class AttentionPooling(nn.Module):
-    """
-    注意力池化机制：学习时间维度上的重要性权重
-    用于 SER 任务，关注情感表达的关键时刻
-    """
+    """Masked attention pooling over the sequence dimension."""
     def __init__(self, hidden_size, attention_hidden_size=256, dropout=0.1):
         super(AttentionPooling, self).__init__()
-        # 两层 MLP 计算注意力分数
+
         self.attention = nn.Sequential(
             nn.Linear(hidden_size, attention_hidden_size),
             nn.Tanh(),
             nn.Dropout(dropout),
             nn.Linear(attention_hidden_size, 1)
         )
-    
+
     def forward(self, hidden_states, attention_mask=None):
-        """
-        Args:
-            hidden_states: (B, T, D) 序列特征
-            attention_mask: (B, T) 有效位置的mask (1=有效, 0=padding)
-        
-        Returns:
-            pooled: (B, D) 加权池化后的特征
-            attention_weights: (B, T, 1) 注意力权重（可用于可视化）
-        """
-        # 计算注意力分数
-        attention_scores = self.attention(hidden_states)  # (B, T, 1)
-        
-        # 应用 mask（将 padding 位置设为极小值）
+
+
+        attention_scores = self.attention(hidden_states)
+
+
         if attention_mask is not None:
             attention_scores = attention_scores.masked_fill(
-                attention_mask.unsqueeze(-1) == 0, 
+                attention_mask.unsqueeze(-1) == 0,
                 -1e9
             )
-        
-        # Softmax 归一化
-        attention_weights = F.softmax(attention_scores, dim=1)  # (B, T, 1)
-        
-        # 加权求和
-        pooled = torch.sum(hidden_states * attention_weights, dim=1)  # (B, D)
-        
+
+
+        attention_weights = F.softmax(attention_scores, dim=1)
+
+
+        pooled = torch.sum(hidden_states * attention_weights, dim=1)
+
         return pooled, attention_weights

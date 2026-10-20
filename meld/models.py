@@ -1,13 +1,6 @@
-"""Controlled current-utterance A/T baselines with optional R2 auxiliary heads.
+"""Audio-text recognizers with CTC and contrastive training.
 
-Anchor modules/operations preserve official MMSD SER forward computation;
-optional CTC/instance-contrastive branches use pre-fusion encoder states. Shared attention
-is adapted from the frozen TriMEF v47 JointTrimodalAttention with video removed,
-3 x 768/12/3072 layers, and equal A/T masked-mean readout. A/T expert readouts
-follow TriMEF: raw encoded audio and self-attended text before joint interaction.
-No emotion labels, history, visual tokens or augmentation enter model.forward.
-CTC targets/loss/eligibility stay in the trainer; instance CL uses pairing only.
-"""
+MMSD fusion; shared-Transformer baseline adapted from TriMEF."""
 import hashlib
 from types import SimpleNamespace
 
@@ -62,7 +55,7 @@ def mmsd_config(config):
 
 
 class CTCHead(nn.Module):
-    """Original MMSD ASR head with valid-frame packing for its bidirectional RNN."""
+
 
     def __init__(self, hidden_size=768):
         super().__init__()
@@ -81,7 +74,7 @@ class CTCHead(nn.Module):
         if not bool(((feature_lengths > 0) &
                      (feature_lengths <= audio_hidden.size(1))).all()):
             raise ValueError("CTC frame lengths must be in [1, padded sequence length]")
-        # Disable surrounding bf16 autocast for both the packed LSTM and readout.
+
         with torch.autocast(device_type=audio_hidden.device.type, enabled=False):
             features = self.dropout(audio_hidden.float())
             packed = pack_padded_sequence(features, feature_lengths.detach().cpu(),
@@ -93,7 +86,7 @@ class CTCHead(nn.Module):
 
 
 class InstanceContrastiveHead(nn.Module):
-    """MMSD symmetric in-batch A/T InfoNCE; no emotion-label argument."""
+
 
     def __init__(self, hidden_size=768):
         super().__init__()
@@ -113,13 +106,13 @@ class InstanceContrastiveHead(nn.Module):
                                p=2, dim=-1)
             similarity = audio @ text.transpose(0, 1) / self.temperature
             positive = torch.arange(audio.size(0), device=audio.device)
-            # For B=1 each direction is exactly zero: no invented negative pair.
+
             return (F.cross_entropy(similarity, positive) +
                     F.cross_entropy(similarity.transpose(0, 1), positive)) / 2.0
 
 
 def auxiliary_state_sha256(modules):
-    """Canonical FP32 initial-state digest, independent of serialization metadata."""
+
     digest = hashlib.sha256()
     found = False
     for prefix, module in sorted(modules.items()):
@@ -135,7 +128,7 @@ def auxiliary_state_sha256(modules):
 
 
 class SharedAttention(nn.Module):
-    """A/T version of TriMEF's shared Transformer; modalities pool separately."""
+
 
     def __init__(self, hidden_size=768, num_heads=12, num_layers=3,
                  feedforward_size=3072, dropout=0.1, gradient_checkpointing=True):
@@ -153,7 +146,7 @@ class SharedAttention(nn.Module):
         self.output_norm = nn.LayerNorm(hidden_size)
 
     def forward(self, audio_tokens, text_tokens, audio_mask, text_mask):
-        # Preserve TriMEF's T,A order and modality-id convention (T=0, A=1).
+
         text_input = text_tokens + self.modality_embeddings[0].to(text_tokens.dtype)
         audio_input = audio_tokens + self.modality_embeddings[1].to(audio_tokens.dtype)
         hidden = torch.cat((text_input, audio_input), dim=1)
@@ -175,12 +168,7 @@ class SharedAttention(nn.Module):
 
 
 class AnchorFusion(nn.Module):
-    """Official MMSD cross-attention/gating/readout, without auxiliary heads.
 
-    The common text self-attention and first audio projection live in Model.
-    Three cross blocks each have the official depth of one. No sequence pooling,
-    residual, gate, or classifier operation has been replaced.
-    """
 
     def __init__(self, config):
         super().__init__()
@@ -208,7 +196,7 @@ class AnchorFusion(nn.Module):
                 audio_projected=None):
         if audio_projected is None:
             raise ValueError("AnchorFusion requires the common audio2text projection")
-        # Official implementation uses the parameter dtype for additive masks.
+
         dtype = next(self.parameters()).dtype
         am = extended_mask(audio_mask, dtype)
         tm = extended_mask(text_mask, dtype)
@@ -223,7 +211,7 @@ class AnchorFusion(nn.Module):
 
 
 class Model(nn.Module):
-    """Same pretrained encoders, freezing, adapters and inputs for all variants."""
+
 
     def __init__(self, config, audio_encoder=None, text_encoder=None):
         super().__init__()
@@ -243,7 +231,7 @@ class Model(nn.Module):
         if config.get("freeze_audio_extractor", True):
             for p in self.wav2vec2.feature_extractor.parameters():
                 p.requires_grad_(False)
-        # This vector is never consumed because SpecAugment is explicitly off.
+
         if hasattr(self.wav2vec2, "masked_spec_embed"):
             self.wav2vec2.masked_spec_embed.requires_grad_(False)
         if config.get("freeze_text_embeddings", True):
@@ -254,12 +242,12 @@ class Model(nn.Module):
                 p.requires_grad_(False)
         if self.gradient_checkpointing:
             for encoder in (self.wav2vec2, self.roberta):
-                # Non-reentrant checkpointing is required with frozen early text layers.
+
                 if hasattr(encoder, "gradient_checkpointing_enable"):
                     encoder.gradient_checkpointing_enable(
                         gradient_checkpointing_kwargs={"use_reentrant": False})
 
-        # Keep construction order identical for common new parameters.
+
         self.self_attention_text = BertSelfEncoder(cfg)
         self.audio2text = nn.Linear(cfg.hidden_size, cfg.hidden_size)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
@@ -287,10 +275,7 @@ class Model(nn.Module):
             self.audio_head = make_expert()
             self.text_head = make_expert()
 
-        # Build auxiliary parameters only after all SER parameters. The isolated
-        # CPU generator preserves the pre-existing SER initialization/RNG stream.
-        # torch.manual_seed would also reseed initialized CUDA generators, which
-        # fork_rng(devices=[]) deliberately does not save; seed only the CPU here.
+
         weights = config.get("auxiliary_weights", {})
         self.ctc_head = None
         self.contrastive_head = None
@@ -343,9 +328,7 @@ class Model(nn.Module):
             result = {"logits": logits, "expert_logits": expert_logits,
                       "joint_logits": joint_logits, "pooled": joint["pooled"]}
 
-        # Auxiliary dropout runs after the complete SER path, preserving this
-        # forward's existing classification dropout draws. Future RNG sequences
-        # need not be bitwise equal to a run without auxiliary computation.
+
         compute_auxiliary = self.training if compute_auxiliary is None else bool(compute_auxiliary)
         result.update(ctc_logits=None, ctc_input_lengths=None, contrastive_loss=None)
         if compute_auxiliary:

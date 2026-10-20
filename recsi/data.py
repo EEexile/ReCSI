@@ -1,4 +1,4 @@
-"""Feature-cache validation and local artifact IO."""
+"""Feature-cache validation and artifact IO."""
 import hashlib
 import json
 import math
@@ -36,7 +36,7 @@ def write_json(path, value, exclusive=False):
 
 
 def load_tensor_dict(path):
-    # Release caches contain only tensors, strings, numbers and containers.
+
     return torch.load(path, map_location="cpu", weights_only=True)
 
 

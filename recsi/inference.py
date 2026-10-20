@@ -1,4 +1,4 @@
-"""Temperature calibration, training-count factors, and exact speaker inference."""
+"""Temperature calibration and exact same-speaker forest inference."""
 from collections import defaultdict
 import heapq
 import math

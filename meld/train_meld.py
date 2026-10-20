@@ -1,4 +1,4 @@
-"""Fixed-budget MELD Stage-I. Official dev selects checkpoint; test is not evaluated."""
+"""Train MELD Stage I with development-set checkpoint selection."""
 import argparse
 import contextlib
 import csv
@@ -221,18 +221,18 @@ def run(args):
         start_epoch = saved['epoch'] + 1
         best_correct, best_epoch = saved['best_correct'], saved['best_epoch']
         elapsed_before = saved['elapsed_seconds']
-        # A later crash may have written partial history after this recovery point.
+
         history = [json.loads(line) for line in (output / 'history.jsonl').read_text().splitlines()]
         export_jsonl(output / 'history.jsonl', [h for h in history if h['epoch'] < start_epoch])
-        # Restore the best associated with this recovery point. Failed-attempt
-        # artifacts were archived above; CUDA replay is not promised bitwise exact.
+
+
         recovery_best = torch.load(output / saved['recovery_best_file'], map_location='cpu', weights_only=False)
         assert recovery_best['epoch'] == best_epoch
         save_checkpoint(output / 'best.pt', recovery_best)
         del recovery_best
         del saved
     elif args.resume and (output / 'history.jsonl').exists():
-        # No full recovery state yet: preserve the failed attempt and restart at the same seed.
+
         archive = output / ('attempt_before_restart_' + str(time.time_ns()))
         archive.mkdir()
         for filename in ['history.jsonl', 'best.pt', 'dev_predictions.jsonl', 'experts.jsonl', 'best_selection.json']:
@@ -306,7 +306,7 @@ def run(args):
         improved = is_better(metrics, best_correct)
         if improved:
             best_correct, best_epoch = metrics['correct'], epoch
-            # Store full precision model weights so later evaluation reproduces this point.
+
             save_checkpoint(output / 'best.pt', {'model': model.state_dict(), 'epoch': epoch, 'metrics': metrics,
                             'variant': args.variant, 'dataset': 'MELD', 'seed': config['seed'], 'config': config, 'source_hashes': source})
             export_jsonl(output / 'dev_predictions.jsonl', records)
@@ -331,7 +331,7 @@ def run(args):
         append_json(output / 'history.jsonl', row)
         print(json.dumps({'event': 'epoch_complete', **row}), flush=True)
         if epoch % config['recovery_every_epochs'] == 0 or epoch == config['epochs']:
-            # Immutable hard link created before publishing the recovery state.
+
             recovery = output / ('recovery_best_epoch_%03d.pt' % best_epoch)
             if not recovery.exists():
                 os.link(str(output / 'best.pt'), str(recovery))

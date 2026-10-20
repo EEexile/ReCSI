@@ -1,2 +1,2 @@
-"""ReCSI: residual correction and fixed same-speaker probabilistic inference."""
+"""ReCSI."""
 __version__ = "0.1.0"

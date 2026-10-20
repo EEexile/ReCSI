@@ -1,10 +1,4 @@
-"""Export [audio768,text768,fused1536,logitsC] from a local Stage-I checkpoint.
-
-Metadata is a JSON list in precisely the same order as the original CSV. It
-contains id/dialogue/speaker and MELD turn or actual IEMOCAP start/end seconds.
-CSV order, dynamic padding, batch size16, BF16 and TF32 follow the archived
-exporter. The hook reads fusion inputs and does not change network operations.
-"""
+"""Export frozen audio, text, fusion features, and logits from a local Stage-I checkpoint."""
 import argparse
 import contextlib
 import importlib
@@ -50,8 +44,8 @@ def main():
         tr, heldout = data.split_rows(data.read_rows(cfg["csv_path"]), a.fold)
         rows = tr if a.split == "train" else heldout
         ds = data.IEMOCAPDataset(rows, cfg)
-    # Original Stage-I checkpoints also contain Python/NumPy RNG state.
-    # This command is only for a checkpoint that the user created and trusts.
+
+
     checkpoint = torch.load(a.checkpoint, map_location="cpu", weights_only=False)
     old_config = checkpoint["config"]
     for key in ("variant", "num_classes", "hidden_size", "num_heads", "dropout", "head_dropout",
