@@ -1,14 +1,53 @@
-"""TRAIN count statistics and exact log-domain sum-product on directed forests.
-
-Pseudo-emissions are p_i(c)/pi_c. Root factors are pi; edge factors are the
-row-stochastic A[previous_class, current_class]. Future unlabeled observations
-participate in the downward pass; this is offline smoothing, not causal decoding.
-"""
+"""Temperature calibration, training-count factors, and exact speaker inference."""
 from collections import defaultdict
 import heapq
+import math
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+
+def normalize_probabilities(p):
+    p = p.double().clamp_min(1e-12)
+    return p / p.sum(1, keepdim=True)
+
+
+def apply_temperature(p, temperature):
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("Temperature must be positive and finite")
+    return (normalize_probabilities(p).log()/temperature).softmax(1)
+
+
+def fit_temperature(probabilities, labels):
+    p = normalize_probabilities(probabilities)
+    labels = labels.to(device=p.device, dtype=torch.long)
+    logp = p.log()
+    theta = torch.zeros((), dtype=torch.float64, device=p.device, requires_grad=True)
+    trace = []
+    optimizer = torch.optim.LBFGS([theta], lr=1, max_iter=100, max_eval=150,
+        history_size=20, tolerance_grad=1e-9, tolerance_change=1e-12,
+        line_search_fn="strong_wolfe")
+
+    def closure():
+        optimizer.zero_grad()
+        loss = F.cross_entropy(logp/theta.exp(), labels)
+        if not torch.isfinite(loss):
+            raise FloatingPointError("Nonfinite calibration objective")
+        loss.backward()
+        if not torch.isfinite(theta.grad):
+            raise FloatingPointError("Nonfinite calibration gradient")
+        trace.append({"logT": float(theta.detach()), "NLL": float(loss.detach()),
+                      "gradient": float(theta.grad)})
+        return loss
+
+    before = float(closure().detach())
+    optimizer.step(closure)
+    after = float(closure().detach())
+    temperature = float(theta.detach().exp())
+    if not math.isfinite(temperature) or temperature <= 0 or after > before+1e-10:
+        raise FloatingPointError("Temperature fit failed the original finite/NLL gate")
+    return {"temperature": temperature, "NLL_before": before, "NLL_after": after,
+            "trace": trace, "fit_count": len(labels), "fit_only": "MELD dev"}
 
 
 def topology(parent):
@@ -103,3 +142,24 @@ def smooth_forest(probability, prior, transition, parent):
             cavity = down[pidx]+phi[pidx]-message[i]
             down[i] = torch.logsumexp(cavity[:, None]+logA, dim=0)
     return (phi+down).softmax(1), logZ
+
+
+def classification_metrics(labels, predictions, classes):
+    y = np.asarray(labels, dtype=np.int64)
+    p = np.asarray(predictions, dtype=np.int64)
+    if y.shape != p.shape or y.ndim != 1 or not len(y):
+        raise ValueError("Expected matching nonempty label/prediction vectors")
+    if min(y.min(), p.min()) < 0 or max(y.max(), p.max()) >= classes:
+        raise ValueError("Class index outside the fixed label vocabulary")
+    cm = np.zeros((classes, classes), dtype=np.int64)
+    np.add.at(cm, (y, p), 1)
+    support, guessed, tp = cm.sum(1), cm.sum(0), cm.diagonal()
+    recall = np.divide(tp, support, out=np.zeros(classes), where=support > 0)
+    precision = np.divide(tp, guessed, out=np.zeros(classes), where=guessed > 0)
+    f1 = np.divide(2*tp, support+guessed, out=np.zeros(classes), where=support+guessed > 0)
+    return {"W-F1": 100*float((f1*support).sum()/len(y)),
+            "WA": 100*float(tp.sum()/len(y)), "UA": 100*float(recall.mean()),
+            "Macro-F1": 100*float(f1.mean()), "confusion": cm.tolist(),
+            "per_class_precision": (100*precision).tolist(),
+            "per_class_recall": (100*recall).tolist(), "per_class_f1": (100*f1).tolist(),
+            "n": len(y), "correct": int(tp.sum())}

@@ -33,8 +33,8 @@ def main():
     a = p.parse_args()
     import torch
     from torch.utils.data import DataLoader
-    from recsi.cache import load_cache
-    from recsi.io import digest, read_json, save_tensor_dict
+    from recsi.data import load_cache
+    from recsi.data import digest, read_json, save_tensor_dict
     sys.path.insert(0, str(ROOT/a.dataset.lower()))
     data = importlib.import_module("data")
     models = importlib.import_module("models")
