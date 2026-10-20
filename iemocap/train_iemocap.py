@@ -1,4 +1,4 @@
-"""Train one IEMOCAP LOSO fold with held-out-session checkpoint selection."""
+"""Train one IEMOCAP LOSO fold."""
 import argparse
 import contextlib
 import csv
